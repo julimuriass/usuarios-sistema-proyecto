@@ -84,6 +84,53 @@ mod usuarios_sistema {
             self.value
         }
 
+        //Verificadores del sistema.
+        #[ink(message)]
+        pub fn existe_usuario(&self, id: AccountId) -> Result<bool, ErrorSistema> {
+            // Verifica si el usuario existe en el sistema.
+            if self.usuarios.get(&id).is_some() {
+                Ok(true)
+            } else {
+                Err(ErrorSistema::UsuarioNoExiste)
+            }
+        }
+
+        //Verificador para ver si el usuario existe o no
+        #[ink(message)]
+        pub fn es_vendedor(&self, id: AccountId) -> Result<bool, ErrorSistema> { //Duda: Está bien recibirlo como parámetro al id o lo tengo que obtener del caller?
+            //Duda: Debería preguntar acá o en el privado si el usuario existe?
+            _es_vendedor(id)
+        }
+
+        fn _es_vendedor(&self) -> bool {
+            let caller = self.env().caller();
+            if let Some(user) = self.usuarios.get(caller) {
+                match user.rol {
+                    Rol::Vendedor | Rol::Ambos => true,
+                    _ => false,
+                }
+            } else {
+                false // Si el usuario no existe, no es vendedor.
+            }
+        }
+
+        #[ink(message)]
+        pub fn es_comprador(&self) -> bool {
+            let caller = self.env().caller();
+            if let Some(user) = self.usuarios.get(caller) {
+                match user.rol {
+                    Rol::Comprador | Rol::Ambos => true,
+                    _ => false,
+                }
+            } else {
+                false // Si el usuario no existe, no es comprador.
+            }
+        } 
+
+
+        //Funciones asociadas a usuarios.
+        // ? -> Tendríamos que delegar las funciones al struct usuario? 
+
         #[ink(message)]
         pub fn registrar_usuario(&mut self, nombre:String, apellido:String, email:String, rol:Rol) -> Result<(), ErrorSistema> {
             let id = self.env().caller(); // Se obtiene el AccountId del usuario que llama a la función.
@@ -105,6 +152,18 @@ mod usuarios_sistema {
             Ok(())
         }
 
+        /*#[ink(message)]
+        pub fn modificar_rol(&self, nuevo_rol: Rol) -> Result<(), ErrorSistema> {
+            let id = self.env().caller(); // Se obtiene el AccountId del usuario que llama a la función.
+
+            self._modificar_rol(nuevo_rol, id)?;
+            Ok(())
+        }
+
+        fn _modificar_rol(&mut self, nuevo_rol: Rol, id: AccountId) -> Result<(), ErrorSistema> {
+            
+        }*/
+        
         /*#[ink(message)]
         pub fn modificar_rol(&self, nuevo_rol:Rol)->Result<(), ErrorSistema>{
              self._modificar_rol(nuevo_rol)?
@@ -188,6 +247,21 @@ mod usuarios_sistema {
             let sistema = Sistema::new(true);
             assert_eq!(sistema.usuarios.len(), 0); //Why can't I use len() ???
         }*/
+
+        #[ink::test]
+        fn test_existe_usuario() {
+            let alice = ink::env::test::default_accounts::<ink::env::DefaultEnvironment>().alice;
+            ink::env::test::set_caller::<ink::env::DefaultEnvironment>(alice);
+
+            let mut sistema = Sistema::new(true);
+            sistema.registrar_usuario(String::from("Alice"), String::from("Surname"), String::from("alice.email"), Rol::Comprador);
+
+            assert!(sistema.existe_usuario(alice).is_ok());
+
+            let bob = ink::env::test::default_accounts::<ink::env::DefaultEnvironment>().bob;
+            ink::env::test::set_caller::<ink::env::DefaultEnvironment>(bob);
+            assert!(sistema.existe_usuario(bob).is_err());
+        }
         
     }
 
