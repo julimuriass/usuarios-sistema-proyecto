@@ -20,10 +20,12 @@ mod usuarios_sistema {
         feature = "std",
         derive(ink::storage::traits::StorageLayout)
     )]
+    #[derive(Clone, PartialEq, Eq, Debug)]
 
     pub enum ErrorSistema {
         UsuarioYaRegistrado,
         UsuarioNoExiste,
+        RolYaEnUso,
     }
    
     #[ink::scale_derive(Encode, Decode, TypeInfo)]
@@ -126,22 +128,34 @@ mod usuarios_sistema {
             }
         }
 
-        /*#[ink(message)]
-        pub fn es_comprador(&self) -> bool {
-            let caller = self.env().caller();
-            if let Some(user) = self.usuarios.get(caller) {
-                match user.rol {
-                    Rol::Comprador | Rol::Ambos => true,
-                    _ => false,
-                }
-            } else {
-                false // Si el usuario no existe, no es comprador.
-            }
-        } 
-*/
+        //Mismas dudas que en es_vendedor.
+        #[ink(message)]
+        pub fn es_comprador(&self) -> Result<bool, ErrorSistema> { 
+            let id = self.env().caller(); 
+            self._es_comprador(id)
+        }
 
-        //Funciones asociadas a usuarios.
-        // ? -> Tendríamos que delegar las funciones al struct usuario? 
+        fn _es_comprador(&self, id: AccountId) -> Result<bool, ErrorSistema> {
+            //Si existe el usuario
+                //lo encuentro
+                //y verifico si es comprador o ambos.
+            //Si no existo -> ErrorSistema::UsuarioNoExiste
+
+            if (self.existe_usuario(id)).is_err() {
+                return Err(ErrorSistema::UsuarioNoExiste);
+            } else {
+                //Busco al usuario y verifico su rol.
+                let user = self.usuarios.get(&id);
+                match user.unwrap().rol {
+                    Rol::Comprador | Rol::Ambos => Ok(true),
+                    _ => Ok(false),
+                }   
+            }
+        }
+
+        
+
+        //Funciones asociadas a usuarios. 
 
         #[ink(message)]
         pub fn registrar_usuario(&mut self, nombre:String, apellido:String, email:String, rol:Rol) -> Result<(), ErrorSistema> {
@@ -154,7 +168,6 @@ mod usuarios_sistema {
 
         //Siempre lo marca como ya registrado (por más de que no lo esté) ????
         fn _registrar_usuario(&mut self, nombre:String, apellido:String, email:String, rol:Rol, id:AccountId) -> Result<(), ErrorSistema>{
-            
             // Chequear que el usuario a registrar no exista en el sistema. (Solo registrar usuarios nuevos)
             if self.usuarios.get(&id).is_some() { //Busca match en el mapping.
                 return Err(ErrorSistema::UsuarioYaRegistrado);
@@ -164,36 +177,33 @@ mod usuarios_sistema {
             Ok(())
         }
 
-        /*#[ink(message)]
-        pub fn modificar_rol(&self, nuevo_rol: Rol) -> Result<(), ErrorSistema> {
+        #[ink(message)]
+        pub fn agregar_rol(&mut self, rol: Rol) -> Result<(), ErrorSistema> {
             let id = self.env().caller(); // Se obtiene el AccountId del usuario que llama a la función.
 
-            self._modificar_rol(nuevo_rol, id)?;
+            self._agregar_rol(rol, id)?; //Llama a la función privada que implementa el sistema. Pero tendría que delegarselo al usuario?
+            //Osea: que usuario implemente sus funciones, y una de ellas sea moficiar su rol.
             Ok(())
         }
 
-        fn _modificar_rol(&mut self, nuevo_rol: Rol, id: AccountId) -> Result<(), ErrorSistema> {
-            
-        }*/
-        
-        /*#[ink(message)]
-        pub fn modificar_rol(&self, nuevo_rol:Rol)->Result<(), ErrorSistema>{
-             self._modificar_rol(nuevo_rol)?
-        }
-
-        fn _modificar_rol(&mut self, nuevo_rol:Rol) {
-            if let Some(user) = self.usuarios.get_mut(self.env().caller()){
-                user.rol = nuevo_rol;
-                return Ok(());
+        fn _agregar_rol(&mut self, rol: Rol, id: AccountId) -> Result<(), ErrorSistema> {
+            // Verifica si el usuario existe.
+            if let Some(mut user) = self.usuarios.get(&id) {  
+                // Si el usuario ya tiene el rol, no se agrega.
+                if user.rol == rol {
+                    return Err(ErrorSistema::RolYaEnUso);
+                }
+                // Agrega el nuevo rol al usuario.
+                user.rol = match (user.rol, rol.clone()) {
+                    (Rol::Comprador, Rol::Vendedor) | (Rol::Vendedor, Rol::Comprador) => Rol::Ambos,
+                    _ => rol, //está de más?
+                };
+                self.usuarios.insert(&id, &user); //Lo guardo modificado en le mapping.
+                Ok(())
+            } else {
+                Err(ErrorSistema::UsuarioNoExiste)
             }
-            return Err(ErrorSistema::UsuarioNoExiste);
-        }#[ink(message)]
-        pub fn get_user(&self) -> Result<Usuario, ErrorSistema>{ // Result
-
-            let _caller = self.env().caller(); // Se busca con el AccountId de la cuenta asociada.
-
-            self._get_user(_caller) 
-        }*/
+        }
 
         fn _get_user(&self, id:AccountId)-> Result<Usuario, ErrorSistema>{
 
@@ -300,7 +310,84 @@ mod usuarios_sistema {
             //Pruebo con un usuario (bob) que no esté en el sistema.
             assert!(sistema.es_vendedor().is_err());
         }
-        
+
+        #[ink::test]
+        fn test_es_comprador() {
+            let alice = ink::env::test::default_accounts::<ink::env::DefaultEnvironment>().alice;
+            ink::env::test::set_caller::<ink::env::DefaultEnvironment>(alice);
+
+            let mut sistema = Sistema::new(true);
+            sistema.registrar_usuario(String::from("Alice"), String::from("Surname"), String::from("alice.email"), Rol::Comprador);
+
+            //Pruebo con un usuario (alice) que esté en el sistema y sea comprador.
+            assert!(matches!(sistema.es_comprador(), Ok(true)));
+
+            let charlie = ink::env::test::default_accounts::<ink::env::DefaultEnvironment>().charlie;
+            ink::env::test::set_caller::<ink::env::DefaultEnvironment>(charlie);
+            sistema.registrar_usuario(String::from("Charlie"), String::from("Surname"), String::from("charlie.email"), Rol::Vendedor);
+
+            //Pruebo con un usuario (charlie) que esté en el sistema pero no sea vendedor.
+            assert!(matches!(sistema.es_comprador(), Ok(false)));
+
+
+            let bob = ink::env::test::default_accounts::<ink::env::DefaultEnvironment>().bob;
+            ink::env::test::set_caller::<ink::env::DefaultEnvironment>(bob);
+
+            //Pruebo con un usuario (bob) que no esté en el sistema.
+            assert!(sistema.es_comprador().is_err());
+        }
+
+        #[ink::test]
+        fn test_agregar_rol() {
+            let alice = ink::env::test::default_accounts::<ink::env::DefaultEnvironment>().alice;
+            ink::env::test::set_caller::<ink::env::DefaultEnvironment>(alice);
+
+            let mut sistema = Sistema::new(true);
+            //Inicializa alice como comprador.
+            sistema.registrar_usuario(String::from("Alice"), String::from("Surname"), String::from("alice.email"), Rol::Comprador);
+
+            //Se agrega el rol de vendedor (pasa a tener ambos).
+            assert!(sistema.agregar_rol(Rol::Vendedor).is_ok());
+            if let Some(user) = sistema.usuarios.get(&alice) {
+                assert!(user.rol == Rol::Ambos);
+            }
+            //-----------------------------------------------------
+
+            //Inicializa bob como vendedor.
+            let bob = ink::env::test::default_accounts::<ink::env::DefaultEnvironment>().bob;
+            ink::env::test::set_caller::<ink::env::DefaultEnvironment>(bob);
+
+            let mut sistema = Sistema::new(true);
+            sistema.registrar_usuario(String::from("Bob"), String::from("Surname"), String::from("bob.email"), Rol::Vendedor);
+
+            //Se agrega el rol de vendedor (pasa a tener ambos).
+            assert!(sistema.agregar_rol(Rol::Comprador).is_ok());
+            if let Some(user) = sistema.usuarios.get(&bob) {
+                assert!(user.rol == Rol::Ambos);
+            }
+
+            //-----------------------------------------------------
+
+            //Inicializa charlie como vendedor.
+            let charlie = ink::env::test::default_accounts::<ink::env::DefaultEnvironment>().charlie;
+            ink::env::test::set_caller::<ink::env::DefaultEnvironment>(charlie);
+
+            let mut sistema = Sistema::new(true);
+            sistema.registrar_usuario(String::from("Charlie"), String::from("Surname"), String::from("charlie.email"), Rol::Vendedor);
+
+            //Ya tiene el rol de vendedor. Por lo qe no se puede agregar el rol de vendedor otra vez..
+            let error = sistema.agregar_rol(Rol::Vendedor).unwrap_err();
+            assert_eq!(error, ErrorSistema::RolYaEnUso);
+
+            //-----------------------------------------------------
+            let eve = ink::env::test::default_accounts::<ink::env::DefaultEnvironment>().eve;
+            ink::env::test::set_caller::<ink::env::DefaultEnvironment>(eve);
+
+            //Pruebo con un usuario (dave) que no esté en el sistema.
+            let error = sistema.agregar_rol(Rol::Vendedor).unwrap_err();
+            assert_eq!(error, ErrorSistema::UsuarioNoExiste);
+
+        }
     }
 
 
