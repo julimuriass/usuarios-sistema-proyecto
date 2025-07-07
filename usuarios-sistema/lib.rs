@@ -4,6 +4,7 @@
 mod usuarios_sistema {
     use ink::prelude::{format, string::String};
     use ink::storage::Mapping;    
+    use ink::storage::StorageVec;
 
     #[ink(storage)]
 
@@ -13,6 +14,7 @@ mod usuarios_sistema {
     pub struct Sistema {
         value: bool, //Tendríamos que dejar el value??
         usuarios: ink::storage::Mapping<AccountId, Usuario>,
+        //historial_transacciones: ink::storage::StorageVec<transaccion>, //-> Hay que tener un struct para transaccion???
     }
 
     #[ink::scale_derive(Encode, Decode, TypeInfo)]
@@ -41,6 +43,9 @@ mod usuarios_sistema {
         email:String,
         id:AccountId,
         rol: Rol,
+        //productos: Option<Producto>, //Si es vendedor tiene que tener una lista de sus productos.
+        //orden_compra: Option<OrdenDeCompra>, //Si es comprador tiene que tener una orden de compra.
+        //Duda: Tendría que tener un historial de sus propias transacciones?
     }
     
     
@@ -87,13 +92,6 @@ mod usuarios_sistema {
         }
 
         //Verificadores del sistema.
-        #[ink(message)]
-        pub fn existe_usuario(&self, id: AccountId) -> Result<bool, ErrorSistema> { //Está bien que retorne un result, o solo con el bool alcanza? el return permite que se propague el error en sus llamados.
-            // Verifica si el usuario existe en el sistema.
-            //Duda: si el usuario existe debería retornarlo al usuario, o con el bool alcanza?
-            self._existe_usuario(id)
-        }
-
         fn _existe_usuario(&self, id: AccountId) -> Result<bool, ErrorSistema> {
             if self.usuarios.get(&id).is_some() {
                 Ok(true)
@@ -116,7 +114,7 @@ mod usuarios_sistema {
                 //y verifico si es vendedor o ambos.
             //Si no existo -> ErrorSistema::UsuarioNoExiste
 
-            if (self.existe_usuario(id)).is_err() {
+            if (self._existe_usuario(id)).is_err() {
                 return Err(ErrorSistema::UsuarioNoExiste);
             } else {
                 //Busco al usuario y verifico su rol.
@@ -141,7 +139,7 @@ mod usuarios_sistema {
                 //y verifico si es comprador o ambos.
             //Si no existo -> ErrorSistema::UsuarioNoExiste
 
-            if (self.existe_usuario(id)).is_err() {
+            if (self._existe_usuario(id)).is_err() {
                 return Err(ErrorSistema::UsuarioNoExiste);
             } else {
                 //Busco al usuario y verifico su rol.
@@ -152,8 +150,6 @@ mod usuarios_sistema {
                 }   
             }
         }
-
-        
 
         //Funciones asociadas a usuarios. 
 
@@ -181,29 +177,20 @@ mod usuarios_sistema {
         pub fn agregar_rol(&mut self, rol: Rol) -> Result<(), ErrorSistema> {
             let id = self.env().caller(); // Se obtiene el AccountId del usuario que llama a la función.
 
-            self._agregar_rol(rol, id)?; //Llama a la función privada que implementa el sistema. Pero tendría que delegarselo al usuario?
-            //Osea: que usuario implemente sus funciones, y una de ellas sea moficiar su rol.
-            Ok(())
+            self._agregar_rol(rol, id)
         }
 
-        fn _agregar_rol(&mut self, rol: Rol, id: AccountId) -> Result<(), ErrorSistema> {
+        fn _agregar_rol(&mut self, rol: Rol, id: AccountId) -> Result<(), ErrorSistema> { //Hacer un agregar para cada rol distinto.
             // Verifica si el usuario existe.
             if let Some(mut user) = self.usuarios.get(&id) {  
-                // Si el usuario ya tiene el rol, no se agrega.
-                if user.rol == rol {
-                    return Err(ErrorSistema::RolYaEnUso);
-                }
-                // Agrega el nuevo rol al usuario.
-                user.rol = match (user.rol, rol.clone()) {
-                    (Rol::Comprador, Rol::Vendedor) | (Rol::Vendedor, Rol::Comprador) => Rol::Ambos,
-                    _ => rol, //está de más?
-                };
+                user.agregar_rol(rol.clone())?; //Llama a la función del usuario que modifica su rol. (Lo delega)
                 self.usuarios.insert(&id, &user); //Lo guardo modificado en le mapping.
                 Ok(())
             } else {
                 Err(ErrorSistema::UsuarioNoExiste)
             }
         }
+
 
         fn _get_user(&self, id:AccountId)-> Result<Usuario, ErrorSistema>{
 
@@ -214,6 +201,25 @@ mod usuarios_sistema {
             }
         }
     }
+
+    impl Usuario {
+        //registrarse. ?? Acá sí que no me quedó clara la parte de delegar.
+        //pub fn crear_publicación
+        //pub fn agregar_a_orden_compra
+        
+        pub fn agregar_rol(&mut self, rol: Rol) -> Result<(), ErrorSistema> { //Hacer un agregar para cada rol distinto..
+            if self.rol == rol {
+                return Err(ErrorSistema::RolYaEnUso);
+            }
+            // Agrega el nuevo rol al usuario.
+            self.rol = match (self.rol.clone(), rol.clone()) {
+                (Rol::Comprador, Rol::Vendedor) | (Rol::Vendedor, Rol::Comprador) => Rol::Ambos,
+                _ => rol, //está de más?
+            };
+            Ok(())
+        }
+    }
+
 
     /// Unit tests in Rust are normally defined within such a `#[cfg(test)]`
     /// module and test functions are marked with a `#[test]` attribute.
@@ -278,11 +284,11 @@ mod usuarios_sistema {
             let mut sistema = Sistema::new(true);
             sistema.registrar_usuario(String::from("Alice"), String::from("Surname"), String::from("alice.email"), Rol::Comprador);
 
-            assert!(sistema.existe_usuario(alice).is_ok());
+            assert!(sistema._existe_usuario(alice).is_ok());
 
             let bob = ink::env::test::default_accounts::<ink::env::DefaultEnvironment>().bob;
             ink::env::test::set_caller::<ink::env::DefaultEnvironment>(bob);
-            assert!(sistema.existe_usuario(bob).is_err());
+            assert!(sistema._existe_usuario(bob).is_err());
         }
 
         #[ink::test]
@@ -386,7 +392,6 @@ mod usuarios_sistema {
             //Pruebo con un usuario (dave) que no esté en el sistema.
             let error = sistema.agregar_rol(Rol::Vendedor).unwrap_err();
             assert_eq!(error, ErrorSistema::UsuarioNoExiste);
-
         }
     }
 
