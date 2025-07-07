@@ -86,8 +86,13 @@ mod usuarios_sistema {
 
         //Verificadores del sistema.
         #[ink(message)]
-        pub fn existe_usuario(&self, id: AccountId) -> Result<bool, ErrorSistema> {
+        pub fn existe_usuario(&self, id: AccountId) -> Result<bool, ErrorSistema> { //Está bien que retorne un result, o solo con el bool alcanza? el return permite que se propague el error en sus llamados.
             // Verifica si el usuario existe en el sistema.
+            //Duda: si el usuario existe debería retornarlo al usuario, o con el bool alcanza?
+            self._existe_usuario(id)
+        }
+
+        fn _existe_usuario(&self, id: AccountId) -> Result<bool, ErrorSistema> {
             if self.usuarios.get(&id).is_some() {
                 Ok(true)
             } else {
@@ -95,26 +100,33 @@ mod usuarios_sistema {
             }
         }
 
-        //Verificador para ver si el usuario existe o no
         #[ink(message)]
-        pub fn es_vendedor(&self, id: AccountId) -> Result<bool, ErrorSistema> { //Duda: Está bien recibirlo como parámetro al id o lo tengo que obtener del caller?
+        pub fn es_vendedor(&self) -> Result<bool, ErrorSistema> { //Duda: Está bien recibirlo como parámetro al id o lo tengo que obtener del caller?
             //Duda: Debería preguntar acá o en el privado si el usuario existe?
-            _es_vendedor(id)
+
+            let id = self.env().caller(); //Está bien esto? 
+            self._es_vendedor(id)
         }
 
-        fn _es_vendedor(&self) -> bool {
-            let caller = self.env().caller();
-            if let Some(user) = self.usuarios.get(caller) {
-                match user.rol {
-                    Rol::Vendedor | Rol::Ambos => true,
-                    _ => false,
-                }
+        fn _es_vendedor(&self, id: AccountId) -> Result<bool, ErrorSistema> {
+            //Si existe el usuario
+                //lo encuentro
+                //y verifico si es vendedor o ambos.
+            //Si no existo -> ErrorSistema::UsuarioNoExiste
+
+            if (self.existe_usuario(id)).is_err() {
+                return Err(ErrorSistema::UsuarioNoExiste);
             } else {
-                false // Si el usuario no existe, no es vendedor.
+                //Busco al usuario y verifico su rol.
+                let user = self.usuarios.get(&id);
+                match user.unwrap().rol {
+                    Rol::Vendedor | Rol::Ambos => Ok(true),
+                    _ => Ok(false),
+                }   
             }
         }
 
-        #[ink(message)]
+        /*#[ink(message)]
         pub fn es_comprador(&self) -> bool {
             let caller = self.env().caller();
             if let Some(user) = self.usuarios.get(caller) {
@@ -126,7 +138,7 @@ mod usuarios_sistema {
                 false // Si el usuario no existe, no es comprador.
             }
         } 
-
+*/
 
         //Funciones asociadas a usuarios.
         // ? -> Tendríamos que delegar las funciones al struct usuario? 
@@ -261,6 +273,32 @@ mod usuarios_sistema {
             let bob = ink::env::test::default_accounts::<ink::env::DefaultEnvironment>().bob;
             ink::env::test::set_caller::<ink::env::DefaultEnvironment>(bob);
             assert!(sistema.existe_usuario(bob).is_err());
+        }
+
+        #[ink::test]
+        fn test_es_vendedor() {
+            let alice = ink::env::test::default_accounts::<ink::env::DefaultEnvironment>().alice;
+            ink::env::test::set_caller::<ink::env::DefaultEnvironment>(alice);
+
+            let mut sistema = Sistema::new(true);
+            sistema.registrar_usuario(String::from("Alice"), String::from("Surname"), String::from("alice.email"), Rol::Vendedor);
+
+            //Pruebo con un usuario (alice) que esté en el sistema y sea vendedor.
+            assert!(matches!(sistema.es_vendedor(), Ok(true)));
+
+            let charlie = ink::env::test::default_accounts::<ink::env::DefaultEnvironment>().charlie;
+            ink::env::test::set_caller::<ink::env::DefaultEnvironment>(charlie);
+            sistema.registrar_usuario(String::from("Charlie"), String::from("Surname"), String::from("charlie.email"), Rol::Comprador);
+
+            //Pruebo con un usuario (charlie) que esté en el sistema pero no sea vendedor.
+            assert!(matches!(sistema.es_vendedor(), Ok(false)));
+
+
+            let bob = ink::env::test::default_accounts::<ink::env::DefaultEnvironment>().bob;
+            ink::env::test::set_caller::<ink::env::DefaultEnvironment>(bob);
+
+            //Pruebo con un usuario (bob) que no esté en el sistema.
+            assert!(sistema.es_vendedor().is_err());
         }
         
     }
